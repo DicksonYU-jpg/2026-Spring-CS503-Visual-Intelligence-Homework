@@ -58,13 +58,17 @@ class GPT(nn.Module):
         self.max_seq_len = max_seq_len
         self.init_std = init_std
 
-        self.input_embedding = ??? # TODO: Define the input embedding layer
-        self.positional_embedding = ??? # TODO: Define the learnable positional embedding
+        self.input_embedding = nn.Embedding(vocab_size, dim) # TODO: Define the input embedding layer
+        self.positional_embedding = nn.Embedding(max_seq_len, dim) # TODO: Define the learnable positional embedding
         
-        self.trunk = ??? # TODO: Define the transformer trunk
+        self.trunk = TransformerTrunk(dim=dim,
+                                      depth=depth,
+                                      head_dim=head_dim,
+                                      mlp_ratio=mlp_ratio,
+                                      use_bias=use_bias) # TODO: Define the transformer trunk
         
-        self.out_norm = ??? # TODO: Define the output layer normalization. Use the LayerNorm class defined in modeling/transformer_layers.py
-        self.to_logits = ??? # TODO: Define the output projection layer
+        self.out_norm = LayerNorm(dim, use_bias=use_bias) # TODO: Define the output layer normalization. Use the LayerNorm class defined in modeling/transformer_layers.py
+        self.to_logits = nn.Linear(dim, vocab_size) # TODO: Define the output projection layer
 
         self.initialize_weights() # Weight initialization
 
@@ -114,27 +118,29 @@ class GPT(nn.Module):
         B, L = x.size() # batch size and sequence length
 
         # TODO: Embed the input tokens using the input embedding layer. Shape: [B, L, D]
-        ???
+        input_embed = self.input_embedding(x)
         
         # TODO: Add the positional embeddings to the tokens
         # Hint: Make sure this works for sequences of different lengths
-        ???
+        pos_idx = torch.arange(L, dtype=torch.long, device=x.device)
+        pos_embed = self.positional_embedding(pos_idx) # Shape: [L, D] will be boardcasted later
+        tokens = input_embed + pos_embed # [B, L, D]
 
         # TODO: Define the causal mask for the transformer trunk. 
         # False = masked-out, True = not masked. Shape: [1, L, L]
         # Hint: What shape should the mask have such that each token can attend to itself and
         # all previous tokens, but not to any future tokens?
-        ???
+        causal_mask = torch.tril(torch.ones(L, L)) # [L, L] -> [1, L, L]
             
         # TODO: Forward pass through Transformer trunk
         # Hint: Make sure to pass the causal mask to the transformer trunk too
-        ???
+        x = self.trunk(tokens, causal_mask)
         
         # TODO: Pass to the output normalization and output projection layer to compute the logits
-        ???
+        logits = self.to_logits(self.out_norm(x))
 
         # TODO: Return the logits
-        return ???
+        return logits
 
     def compute_ce_loss(self, logits: torch.Tensor, target_seq: torch.LongTensor, padding_idx: int = -100) -> torch.Tensor:
         """
@@ -149,7 +155,13 @@ class GPT(nn.Module):
         """
         # TODO: Compute the cross-entropy loss
         # Hint: Remember to ignore the padding token index in the loss calculation
-        ???
+        # Convert the shape to fit the ce function
+        logits = rearrange(logits, "B L V -> (B L) V",)
+        target_seq = rearrange(target_seq, "B L -> (B L)")
+
+        ce_loss = F.cross_entropy(input=logits, target=target_seq, ignore_index=padding_idx)
+        return ce_loss
+        
 
     def forward(self, data_dict: Dict[str, Any]) -> Tuple[torch.Tensor, Dict[str, Any]]:
         """
@@ -201,18 +213,22 @@ class GPT(nn.Module):
         for _ in range(self.max_seq_len - len(context)):
 
             # Run a forward pass through the model to get the logits
-            ???
+            # [B, L, C]
+            logits = self.forward_model(current_tokens)
 
             # Keep only the last token's logits and sample the next token
             # Hint: Use the sample_tokens function from utils/sampling.py
             # Make sure to pass the temperature, top_k and top_p arguments
-            ???
+            logits = logits[:, -1, :] # [B, C]
+            next_token_id, _ = sample_tokens(logits, temp, top_p, top_k)
 
             # Concatenate the new token to the current_tokens sequence
-            ???
+            next_token_id = next_token_id.unsqueeze(-1) # [B] -> [B 1]
+            current_tokens = torch.cat((current_tokens, next_token_id), dim=-1)
 
             # Break if the end-of-sequence token is generated
-            ???
+            if next_token_id.item() == eos_idx:
+                break
 
         if was_training:
             self.train()
