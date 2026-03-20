@@ -59,7 +59,7 @@ class GPT(nn.Module):
         self.init_std = init_std
 
         self.input_embedding = nn.Embedding(vocab_size, dim) # TODO: Define the input embedding layer
-        self.positional_embedding = nn.Embedding(max_seq_len, dim) # TODO: Define the learnable positional embedding
+        self.positional_embedding = nn.Parameter(torch.zeros(max_seq_len, dim)) # TODO: Define the learnable positional embedding
         
         self.trunk = TransformerTrunk(dim=dim,
                                       depth=depth,
@@ -68,7 +68,7 @@ class GPT(nn.Module):
                                       use_bias=use_bias) # TODO: Define the transformer trunk
         
         self.out_norm = LayerNorm(dim, bias=use_bias) # TODO: Define the output layer normalization. Use the LayerNorm class defined in modeling/transformer_layers.py
-        self.to_logits = nn.Linear(dim, vocab_size) # TODO: Define the output projection layer
+        self.to_logits = nn.Linear(dim, vocab_size, bias=False) # TODO: Define the output projection layer
 
         self.initialize_weights() # Weight initialization
 
@@ -122,15 +122,14 @@ class GPT(nn.Module):
         
         # TODO: Add the positional embeddings to the tokens
         # Hint: Make sure this works for sequences of different lengths
-        pos_idx = torch.arange(L, dtype=torch.long, device=x.device)
-        pos_embed = self.positional_embedding(pos_idx) # Shape: [L, D] will be boardcasted later
+        pos_embed = self.positional_embedding[:L, :]
         tokens = input_embed + pos_embed # [B, L, D]
 
         # TODO: Define the causal mask for the transformer trunk. 
         # False = masked-out, True = not masked. Shape: [1, L, L]
         # Hint: What shape should the mask have such that each token can attend to itself and
         # all previous tokens, but not to any future tokens?
-        causal_mask = torch.tril(torch.ones(L, L)) # [L, L] -> [1, L, L]
+        causal_mask = torch.tril(torch.ones((L, L), device=x.device, dtype=torch.bool)).unsqueeze(0)
             
         # TODO: Forward pass through Transformer trunk
         # Hint: Make sure to pass the causal mask to the transformer trunk too
